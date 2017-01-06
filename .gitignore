@@ -1,0 +1,5 @@
+*.pyc
+*.png
+venv
+resources/*
+!resources/LiberationSans-Bold.ttf
