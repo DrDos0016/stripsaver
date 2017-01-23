@@ -31,7 +31,7 @@ def save_comic(account, id, details=False, obscenities=True):
 
     print("Acquiring", url)
 
-    cookies = {"nsfw":1} if obscenities else {}
+    cookies = {"nsfw": "1"} if obscenities else {}
     r = requests.get(url, cookies=cookies)
     if r.status_code != 200:
         raise URLError("Could not read URL: {}".format(url))
@@ -54,13 +54,23 @@ def parse_comic_from_html(html):
     comic_info = {"panels": []}
 
     # Title, Author, and Date come from the header
+    # Author/Date become a footer for single panel strips
     header = html.find("table", id="comicborder")
     comic_info["title"] = header.a.text
-    comic_info["author"] = header.find_all("a")[1].text
-    comic_info["date"] = datetime.strptime(
-        header.find_all("b")[1].contents[-1],
-        "%m-%d-%y"
-    ).strftime("%Y-%m-%d")
+
+    if html.find("td", id="panel2") is not None:
+        comic_info["author"] = header.find_all("a")[1].text
+        comic_info["date"] = datetime.strptime(
+            header.find_all("b")[1].contents[-1],
+            "%m-%d-%y"
+        ).strftime("%Y-%m-%d")
+    else:  # Single panel strip has this info in the footer
+        bold = html.find_all("b")[-1]
+        comic_info["author"] = bold.find_all("a")[0].text
+        comic_info["date"] = datetime.strptime(
+            bold.contents[-1].replace(", ", ""),
+            "%m-%d-%y"
+        ).strftime("%Y-%m-%d")
 
     # Parse the comic itself
     panels = [
@@ -248,6 +258,8 @@ def create_comic(comic_info):
 
             # Flush the last word if needed
             lines[dir].append(possible)
+        print(lines)
+        print("TEXT W/H", text_width, text_height)
 
         # Determine sizes
         for dir in ["left", "right"]:
@@ -261,10 +273,13 @@ def create_comic(comic_info):
                     max_width[dir] = text_width
 
         # Adjust panel width/height based on dialog stretching
-        panel_width = 250 + (206 - widths["left"] - widths["right"])
+        #panel_width = 250 + (206 - widths["left"] - widths["right"])
+        panel_width = 250
         panel_height = 350
 
         # Create a panel image
+        print("DIALOG WIDTHS", widths)
+        print("PANEL SIZE", panel_width, panel_height)
         panel_img = Image.new("RGB", (panel_width, panel_height))
 
         # Insert the background (tiled)
@@ -288,110 +303,118 @@ def create_comic(comic_info):
             elif dir == "right":
                 x = panel_img.width - character.width
                 y = panel_img.height - character.height
+                print("BLIT RIGHT CHAR AT", x, y)
             panel_img.paste(character, (x, y), character)
 
             # Insert the balloon
-            balloon_img = Image.new(
-                "RGB",
-                (max_width[dir] + 12, total_height[dir] + 12),
-                BALLOON_BG
-            )
-            draw = ImageDraw.Draw(balloon_img)
-            # Add balloon border (top, bottom, left, right)
-            draw.line(
-                [(0, 0), (balloon_img.width, 0)],
-                fill="#000000",
-                width=2
-            )
-            draw.line(
-                [
-                    (0, balloon_img.height - 2),
-                    (balloon_img.width, balloon_img.height - 2)
-                ],
-                fill="#000000",
-                width=2
-            )
-            draw.line(
-                [(0, 0), (0, balloon_img.height)],
-                fill="#000000",
-                width=2
-            )
-            draw.line(
-                [
-                    (balloon_img.width - 2, 0),
-                    (balloon_img.width - 2, balloon_img.height)
-                ],
-                fill="#000000",
-                width=2
-            )
-
-            # Calculate balloon position
-            balloon_coords = (x + int(dir == "left") - int(dir == "right"),
-                              y - 18 - balloon_img.height)
-
-            # Put BG in the corners (offset by balloon_coords)
-            corner_img = Image.open(
-                os.path.join("resources", "balloon", "upperleftcorner.gif")
-            ).convert("RGBA")
-            rotated = corner_img
-            corners = [
-                (0, balloon_img.height - 6,
-                 6, balloon_img.height),  # bl
-                (balloon_img.width - 6, balloon_img.height - 6,
-                 balloon_img.width, balloon_img.height),  # br
-                (balloon_img.width - 6, 0,
-                 balloon_img.width, 6),  # tr
-                (0, 0,
-                 6, 6),  # tl
-            ]
-            for corner in corners:
-                bg_corner = (
-                    corner[0] + balloon_coords[0],
-                    corner[1] + balloon_coords[1],
-                    corner[2] + balloon_coords[0],
-                    corner[3] + balloon_coords[1],
+            if panel["dialog"][dir]["text"] != "":
+                balloon_img = Image.new(
+                    "RGB",
+                    (max_width[dir] + 12, total_height[dir] + 12),
+                    BALLOON_BG
                 )
-                cropped = panel_img.crop(bg_corner)
-                balloon_img.paste(cropped, corner)
+                draw = ImageDraw.Draw(balloon_img)
+                # Add balloon border (top, bottom, left, right)
+                draw.line(
+                    [(0, 0), (balloon_img.width, 0)],
+                    fill="#000000",
+                    width=2
+                )
+                draw.line(
+                    [
+                        (0, balloon_img.height - 2),
+                        (balloon_img.width, balloon_img.height - 2)
+                    ],
+                    fill="#000000",
+                    width=2
+                )
+                draw.line(
+                    [(0, 0), (0, balloon_img.height)],
+                    fill="#000000",
+                    width=2
+                )
+                draw.line(
+                    [
+                        (balloon_img.width - 2, 0),
+                        (balloon_img.width - 2, balloon_img.height)
+                    ],
+                    fill="#000000",
+                    width=2
+                )
 
-                # Paste corner image
-                rotated = rotated.rotate(90)
-                balloon_img.paste(rotated, corner, rotated)
+                # Calculate balloon position
+                balloon_coords = (x + int(dir == "left") - int(dir == "right"),
+                                  y - 18 - balloon_img.height)
+                if (dir == "right"):
+                    print("BLIT RIGHT BALLOON AT", balloon_coords)
 
-            # Insert the dialog
-            dialog_img = Image.new("RGBA",
-                                   (max_width[dir], total_height[dir]),
-                                   TEXT_BG)
-            draw = ImageDraw.Draw(dialog_img)
-            y = 0
-            line_idx = 0
-            for line in lines[dir]:
-                x = (dialog_img.width - sizes[dir][line_idx][0]) // 2
-                draw.text((x, y), line, TEXT_FG, font=font, spacing=SPACING)
-                y += sizes[dir][line_idx][1]
-                line_idx += 1
+                # Put BG in the corners (offset by balloon_coords)
+                corner_img = Image.open(
+                    os.path.join("resources", "balloon", "upperleftcorner.gif")
+                ).convert("RGBA")
+                rotated = corner_img
+                corners = [
+                    (0, balloon_img.height - 6,
+                     6, balloon_img.height),  # bl
+                    (balloon_img.width - 6, balloon_img.height - 6,
+                     balloon_img.width, balloon_img.height),  # br
+                    (balloon_img.width - 6, 0,
+                     balloon_img.width, 6),  # tr
+                    (0, 0,
+                     6, 6),  # tl
+                ]
+                for corner in corners:
+                    bg_corner = (
+                        corner[0] + balloon_coords[0],
+                        corner[1] + balloon_coords[1],
+                        corner[2] + balloon_coords[0],
+                        corner[3] + balloon_coords[1],
+                    )
+                    cropped = panel_img.crop(bg_corner)
+                    balloon_img.paste(cropped, corner)
 
-            # Put words in balloon
-            balloon_img.paste(dialog_img, (6, 6))
+                    # Paste corner image
+                    rotated = rotated.rotate(90)
+                    balloon_img.paste(rotated, corner, rotated)
 
-            # Put balloon in panel
-            panel_img.paste(balloon_img, balloon_coords)
+                # Insert the dialog
+                dialog_img = Image.new("RGBA",
+                                       (max_width[dir], total_height[dir]),
+                                       TEXT_BG)
+                draw = ImageDraw.Draw(dialog_img)
+                y = 0
+                line_idx = 0
+                for line in lines[dir]:
+                    x = (dialog_img.width - sizes[dir][line_idx][0]) // 2
+                    draw.text((x, y),
+                              line,
+                              TEXT_FG,
+                              font=font,
+                              spacing=SPACING)
+                    y += sizes[dir][line_idx][1]
+                    line_idx += 1
 
-            # Put tail in panel (easier than resizing balloon_img)
-            tail = Image.open(
-                ("resources" + os.path.sep +
-                 panel["dialog"][dir]["type"] + "-" +
-                 dir + ".gif")
-            ).convert("RGBA")
-            panel_img.paste(
-                tail,
-                (
-                    (balloon_coords[0] +
-                     ((balloon_img.width - tail.width) // 2)),
-                    (balloon_coords[1] + balloon_img.height - 2)
-                ),
-                tail
-            )
+                # Put words in balloon
+                balloon_img.paste(dialog_img, (6, 6))
+
+                # Put balloon in panel
+                panel_img.paste(balloon_img, balloon_coords)
+
+                # Put tail in panel (easier than resizing balloon_img)
+                tail = Image.open(
+                    ("resources" + os.path.sep +
+                     panel["dialog"][dir]["type"] + "-" +
+                     dir + ".gif")
+                ).convert("RGBA")
+                panel_img.paste(
+                    tail,
+                    (
+                        (balloon_coords[0] +
+                         ((balloon_img.width - tail.width) // 2)),
+                        (balloon_coords[1] + balloon_img.height - 2)
+                    ),
+                    tail
+                )
 
         # Store the panel
         panel_imgs.append(panel_img)
